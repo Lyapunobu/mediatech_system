@@ -126,13 +126,19 @@
         click('[data-open-dialog="goods-out-dialog"]');
         row = [...find('issue-lines').querySelectorAll('[data-issue-row]')].find((r) => r.querySelector('[data-field="sku"]').textContent === tracked.sku);
         selectOnly(row);
-        const serialSelect = row.querySelector('[data-serial-select]');
-        const option = [...serialSelect.options].find((o) => o.textContent === 'BROWSER-NEW-A');
+        const serialBoxes = [...row.querySelectorAll('[data-serial-option]')];
+        const option = serialBoxes.find((box) => box.dataset.number === 'BROWSER-NEW-A');
         assert('conditional serial controls stay within the six-column table', !row.querySelector('[data-serial-control]').hidden && find('issue-lines').closest('table').tHead.rows[0].cells.length === 6);
         assert('default serialized limit excludes legacy units with missing serials', row.querySelector('[type="number"]').max === '4');
         change(row.querySelector('[type="number"]'), '1');
-        for (const entry of serialSelect.options) entry.selected = entry === option;
-        serialSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        for (const box of serialBoxes) box.checked = box === option;
+        option.dispatchEvent(new Event('change', { bubbles: true }));
+        assert('checking serials keeps the dispatch quantity equal to the checked count', row.querySelector('[type="number"]').value === '1');
+        change(row.querySelector('[type="number"]'), row.querySelector('[type="number"]').max);
+        assert('serials beyond the maximum cannot be checked', serialBoxes.filter((box) => box.checked).length === 4 && serialBoxes.filter((box) => !box.checked).every((box) => box.disabled));
+        change(row.querySelector('[type="number"]'), '1');
+        for (const box of serialBoxes) box.checked = box === option;
+        option.dispatchEvent(new Event('change', { bubbles: true }));
         find('goods-out-form').requestSubmit();
         assert('selected serial appears in final confirmation', find('goods-out-confirm-dialog').open && find('issue-confirm-rows').textContent.includes('BROWSER-NEW-A'));
         click('#goods-out-confirm-dialog [type="submit"]');
@@ -204,7 +210,7 @@
             && !warehouseRow.querySelector('[type="number"]').disabled && warehouseRow.querySelector('[type="number"]').value === '5');
         const trackedRow = allRows.find((r) => r.querySelector('[data-field="sku"]').textContent === tracked.sku);
         assert('serialized dispatch defaults are ready without manually selecting serials', trackedRow.querySelector('[type="number"]').value === '9'
-            && trackedRow.querySelector('[data-serial-select]').selectedOptions.length === 9);
+            && trackedRow.querySelectorAll('[data-serial-option]:checked').length === 9);
         find('goods-out-form').requestSubmit();
         assert('multi-line review includes every selected line across modal pagination', find('goods-out-confirm-dialog').open && find('issue-confirm-rows').rows.length === 12);
         click('#goods-out-confirm-dialog [type="submit"]');

@@ -7,6 +7,22 @@ function initializeInventory(root, initial) {
         for (const [key, value] of Object.entries(fields)) node.querySelector(`[data-field="${key}"]`).textContent = value;
         return node;
     };
+    const serialDetails = (serials) => {
+        const details = document.createElement('details');
+        details.className = 'mt-1 whitespace-normal';
+        const summary = document.createElement('summary');
+        summary.className = 'cursor-pointer';
+        summary.textContent = `${serials.length} nomor serial`;
+        const list = document.createElement('ul');
+        list.className = 'mt-1 max-h-[150px] overflow-y-auto break-words';
+        for (const serial of serials) {
+            const item = document.createElement('li');
+            item.textContent = serial;
+            list.append(item);
+        }
+        details.append(summary, list);
+        return details;
+    };
     const stockState = { page: 1, size: 10, revision: 0 };
     const movementState = { page: 1, size: 10, revision: 0, loaded: false };
     const dialogTriggers = new WeakMap();
@@ -150,22 +166,7 @@ function initializeInventory(root, initial) {
                 const [time, reference, action] = movementValues(row);
                 const node = setFields(clone('inventory-movement-row'), { time, reference, action, detail: movementDescription(row) });
                 const serials = movementSerials(row);
-                if (serials.length) {
-                    const details = document.createElement('details');
-                    details.className = 'mt-1 whitespace-normal';
-                    const summary = document.createElement('summary');
-                    summary.className = 'cursor-pointer';
-                    summary.textContent = `${serials.length} nomor serial`;
-                    const list = document.createElement('ul');
-                    list.className = 'break-words';
-                    for (const serial of serials) {
-                        const item = document.createElement('li');
-                        item.textContent = serial;
-                        list.append(item);
-                    }
-                    details.append(summary, list);
-                    node.querySelector('[data-field="detail"]').append(details);
-                }
+                if (serials.length) node.querySelector('[data-field="detail"]').append(serialDetails(serials));
                 return node;
             });
             find('movement-rows').replaceChildren(...(rows.length ? rows : [emptyRow(4, 'Belum ada stock movement yang sesuai.')]));
@@ -207,14 +208,14 @@ function initializeInventory(root, initial) {
         } else if (target === 'issue-lines') {
             rows = [...find(target).querySelectorAll('[data-issue-row]')].map((row) => {
                 const item = currentOrder.items.find((i) => String(i.id) === row.dataset.itemId);
-                const serials = [...row.querySelector('[data-serial-select]').selectedOptions].map((o) => o.textContent);
-                return [row.querySelector('[type="checkbox"]').checked ? 'Ya' : 'Tidak', item.sku,
+                const serials = checkedSerials(row).map((box) => box.dataset.number);
+                return [row.querySelector('[data-issue-include]').checked ? 'Ya' : 'Tidak', item.sku,
                     `${item.name}${serials.length ? `\nSerial: ${serials.join(', ')}` : ''}`,
                     row.querySelector('[data-available]').textContent, row.querySelector('[type="number"]').value,
                     row.querySelector('[data-warehouse]').selectedOptions[0]?.textContent ?? ''];
             });
         } else {
-            rows = [...find(target).rows].filter((row) => !row.hasAttribute('data-empty')).map((row) => [...row.cells].map((cell) => cell.textContent.trim()));
+            rows = [...find(target).rows].filter((row) => !row.hasAttribute('data-empty')).map((row) => [...row.cells].map((cell) => cell.dataset.export ?? cell.textContent.trim()));
         }
         return { title: table.caption.textContent.trim(), rows: [header, ...rows] };
     }
@@ -338,9 +339,9 @@ function initializeInventory(root, initial) {
         const reviewButton = issueForm.querySelector('[type="submit"]');
         find('issue-order').replaceChildren(...orders.map((o) => new Option(`${o.number} — ${o.customer}`, o.id)));
         function updateIssueRow(row, item, rebuildSerials = false, syncSerials = true) {
-            const checkbox = row.querySelector('[type="checkbox"]');
+            const checkbox = row.querySelector('[data-issue-include]');
             const quantity = row.querySelector('[type="number"]');
-            const serialSelect = row.querySelector('[data-serial-select]');
+            const serialList = row.querySelector('[data-serial-list]');
             const warehouse = row.querySelector('[data-warehouse]');
             const stock = item.stocks.find((s) => String(s.warehouse_id) === warehouse.value);
             const limit = shipmentLimit(item, stock);
@@ -352,22 +353,37 @@ function initializeInventory(root, initial) {
             quantity.max = limit;
             if (rebuildSerials) {
                 quantity.value = !validQuantity(quantity.value) || quantityUnits(quantity.value) > quantityUnits(limit) ? limit : quantity.value;
-                serialSelect.replaceChildren(...(stock?.serials ?? []).map((s) => new Option(s.number, s.id)));
+                serialList.replaceChildren(...(stock?.serials ?? []).map((s) => {
+                    const option = setFields(clone('inventory-serial-option'), { number: s.number });
+                    const box = option.querySelector('[data-serial-option]');
+                    box.value = s.id;
+                    box.dataset.number = s.number;
+                    return option;
+                }));
             }
             if (item.track_serial && syncSerials && checkbox.checked) {
                 const reserved = row.isConnected ? [...find('issue-lines').querySelectorAll('[data-issue-row]')]
-                    .filter((other) => other !== row && other.querySelector('[type="checkbox"]').checked)
-                    .flatMap((other) => [...other.querySelector('[data-serial-select]').selectedOptions].map((option) => option.value)) : [];
+                    .filter((other) => other !== row && other.querySelector('[data-issue-include]').checked)
+                    .flatMap((other) => checkedSerials(other).map((box) => box.value)) : [];
                 const selected = defaultSerialSelection(stock?.serials ?? [], quantity.value,
-                    [...serialSelect.selectedOptions].map((option) => option.value), reserved);
-                for (const option of serialSelect.options) option.selected = selected.includes(option.value);
+                    checkedSerials(row).map((box) => box.value), reserved);
+                for (const box of serialOptions(row)) box.checked = selected.includes(box.value);
             }
             row.querySelector('[data-available]').textContent = `${formatQuantity(stock?.qty ?? '0')} ${item.unit}`;
             row.querySelector('[data-serial-control]').hidden = !item.track_serial;
-            row.querySelector('[data-serial-hint]').textContent = `${stock?.serials.length ?? 0} serial tersedia. Stok lama tanpa serial tidak dapat dikirim.`;
-            serialSelect.disabled = !item.track_serial || !checkbox.checked;
-            serialSelect.required = item.track_serial && checkbox.checked;
-            serialSelect.setAttribute('aria-label', `Serial ${item.sku}`);
+            const serialCount = stock?.serials.length ?? 0;
+            serialList.hidden = !serialCount;
+            serialList.setAttribute('aria-label', `Nomor serial ${item.sku}`);
+            row.querySelector('[data-serial-hint]').textContent = serialCount
+                ? `${checkedSerials(row).length} dari ${serialCount} dicentang.`
+                : 'Tidak ada nomor serial tersedia di gudang ini.';
+            const unserialized = (quantityUnits(stock?.qty ?? '0') ?? 0n) - BigInt(serialCount) * 1000n;
+            const note = row.querySelector('[data-serial-note]');
+            note.hidden = unserialized <= 0n;
+            note.textContent = `${formatQuantity(quantityString(unserialized > 0n ? unserialized : 0n))} ${item.unit} stok lama tanpa nomor serial tidak dapat dikirim.`;
+            row.querySelector('[data-qty-max]').textContent = `Maks. ${formatQuantity(limit)} ${item.unit}`;
+            const full = BigInt(checkedSerials(row).length) * 1000n >= (quantityUnits(limit) ?? 0n);
+            for (const box of serialOptions(row)) box.disabled = !item.track_serial || !checkbox.checked || (full && !box.checked);
         }
         function renderIssueLines() {
             const rows = (currentOrder?.items ?? []).map((item, index) => {
@@ -375,7 +391,7 @@ function initializeInventory(root, initial) {
                     sku: item.sku, name: item.name, remaining: `Sisa pesanan: ${formatQuantity(quantityString(quantityUnits(item.ordered) - quantityUnits(item.delivered)))} ${item.unit}`,
                 });
                 row.dataset.itemId = item.id;
-                const checkbox = row.querySelector('[type="checkbox"]');
+                const checkbox = row.querySelector('[data-issue-include]');
                 checkbox.name = `include_${index}`;
                 checkbox.setAttribute('aria-label', `Pilih ${item.name}`);
                 checkbox.checked = true;
@@ -420,7 +436,11 @@ function initializeInventory(root, initial) {
             const row = event.target.closest('[data-issue-row]');
             if (!row || !currentOrder) return;
             const item = currentOrder.items.find((i) => String(i.id) === row.dataset.itemId);
-            updateIssueRow(row, item, event.target.matches('[data-warehouse]'), !event.target.matches('[data-serial-select]'));
+            const serialPicked = event.target.matches('[data-serial-option]');
+            const typed = event.target.matches('[type="number"]') ? event.target : null;
+            if (typed && validQuantity(typed.value) && quantityUnits(typed.value) > quantityUnits(typed.max)) typed.value = typed.max;
+            if (serialPicked) row.querySelector('[type="number"]').value = String(checkedSerials(row).length);
+            updateIssueRow(row, item, event.target.matches('[data-warehouse]'), !serialPicked);
             find('issue-error').hidden = true;
         }
         find('issue-lines').addEventListener('change', issueRowChanged);
@@ -434,10 +454,10 @@ function initializeInventory(root, initial) {
                 issueForm.reportValidity();
                 return;
             }
-            const selections = [...find('issue-lines').querySelectorAll('[data-issue-row]')].filter((r) => r.querySelector('[type="checkbox"]').checked).map((row) => ({
+            const selections = [...find('issue-lines').querySelectorAll('[data-issue-row]')].filter((r) => r.querySelector('[data-issue-include]').checked).map((row) => ({
                 so_item_id: row.dataset.itemId, warehouse_id: row.querySelector('[data-warehouse]').value,
                 quantity: row.querySelector('[type="number"]').value,
-                serial_ids: [...row.querySelector('[data-serial-select]').selectedOptions].map((o) => o.value).sort(),
+                serial_ids: checkedSerials(row).map((box) => box.value).sort(),
             }));
             const error = validateShipment(currentOrder, selections);
             find('issue-error').textContent = error;
@@ -453,10 +473,14 @@ function initializeInventory(root, initial) {
                 const item = currentOrder.items.find((i) => String(i.id) === selection.so_item_id);
                 const stock = item.stocks.find((s) => String(s.warehouse_id) === selection.warehouse_id);
                 const serials = stock.serials.filter((s) => selection.serial_ids.includes(String(s.id))).map((s) => s.number);
-                return setFields(clone('inventory-confirm-row'), {
-                    sku: item.sku, name: item.name + (serials.length ? `\nSerial: ${serials.join(', ')}` : ''),
+                const row = setFields(clone('inventory-confirm-row'), {
+                    sku: item.sku, name: item.name,
                     quantity: `${formatQuantity(selection.quantity)} ${item.unit}`, warehouse: stock.warehouse,
                 });
+                const name = row.querySelector('[data-field="name"]');
+                name.dataset.export = item.name + (serials.length ? `\nSerial: ${serials.join(', ')}` : '');
+                if (serials.length) name.append(serialDetails(serials));
+                return row;
             }));
             confirmPager.reset();
             const source = find('goods-out-dialog');
@@ -573,6 +597,12 @@ function shipmentLimit(item, stock) {
     if (limit > available) limit = available;
     if (item.track_serial && limit > BigInt(stock?.serials.length ?? 0) * 1000n) limit = BigInt(stock?.serials.length ?? 0) * 1000n;
     return quantityString(limit > 0n ? limit : 0n);
+}
+function serialOptions(row) {
+    return [...row.querySelectorAll('[data-serial-option]')];
+}
+function checkedSerials(row) {
+    return serialOptions(row).filter((box) => box.checked);
 }
 function defaultSerialSelection(serials, quantity, current = [], reserved = []) {
     const units = quantityUnits(quantity);

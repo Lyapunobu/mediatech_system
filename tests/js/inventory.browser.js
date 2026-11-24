@@ -122,7 +122,7 @@
         const rows = [...find('issue-lines').querySelectorAll('[data-issue-row]')];
         assert('SO details load real stable item IDs', rows.length > 0 && rows.every((r) => r.dataset.itemId));
         assert('serialized rows have their default serials selected without extra user input', rows.filter((r) => !r.querySelector('[data-serial-control]').hidden && r.querySelector('[type="checkbox"]').checked)
-            .every((r) => r.querySelector('[data-serial-select]').selectedOptions.length === Number(r.querySelector('[type="number"]').value)));
+            .every((r) => r.querySelectorAll('[data-serial-option]:checked').length === Number(r.querySelector('[type="number"]').value)));
         const row = rows.find((r) => r.querySelector('[data-serial-control]').hidden && Number(r.querySelector('[type="number"]').max) > 0);
         if (!row) throw new Error('Smoke fixture needs a nonserialized outstanding item with stock.');
         for (const candidate of rows) {
@@ -139,6 +139,9 @@
         quantity.value = String(Number(quantity.max) + 1);
         find('goods-out-form').requestSubmit();
         assert('over-quantity remains in the form', find('goods-out-dialog').open && !quantity.checkValidity());
+        quantity.value = String(Number(quantity.max) + 5);
+        quantity.dispatchEvent(new Event('input', { bubbles: true }));
+        assert('typing above the maximum is capped to the maximum', quantity.value === quantity.max);
         const partial = String(Math.min(3, Number(quantity.max)));
         quantity.value = partial;
         const notes = '<script>window.inventoryInjected=true</script>';

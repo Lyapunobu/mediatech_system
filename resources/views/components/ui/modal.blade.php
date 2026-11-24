@@ -7,7 +7,7 @@
                 <p id="{{ $id }}-description" class="mt-[5px] text-[11px] text-neutral-500">{{ $description }}</p>
             @endif
         </div>
-        <button type="button" data-close-dialog aria-label="Tutup dialog" class="ui-dialog-close"><span aria-hidden="true">×</span></button>
+        <button type="button" data-close-dialog aria-label="Tutup dialog" class="ui-dialog-close"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m17 7-5 5m0 0-5 5m5-5-5-5m5 5 5 5"/></svg></button>
     </div>
     {{ $slot }}
 </dialog>
