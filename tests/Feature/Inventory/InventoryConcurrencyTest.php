@@ -161,7 +161,7 @@ class InventoryConcurrencyTest extends TestCase
         $actor = $this->actor();
         $product = Product::factory()->create();
         $warehouse = Warehouse::factory()->create();
-        $maximum = '999999999999999.999';
+        $maximum = '999999999999999.000';
         $this->actingAs($actor)->postJson('http://app.meditech.local/inventory/goods-receipts', [
             'product_id' => $product->getKey(), 'warehouse_id' => $warehouse->getKey(),
             'reference' => 'MYSQL-MAXIMUM-QUANTITY', 'quantity' => $maximum, 'serial_numbers' => [],

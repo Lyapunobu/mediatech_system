@@ -40,9 +40,9 @@ class GoodsReceiptTest extends InventoryTestCase
         $product = Product::factory()->create();
         $warehouse = Warehouse::factory()->create();
         $this->actingAs($this->userWithPermissions());
-        $data = ['product_id' => $product->getKey(), 'warehouse_id' => $warehouse->getKey(), 'quantity' => '0.125'];
+        $data = ['product_id' => $product->getKey(), 'warehouse_id' => $warehouse->getKey(), 'quantity' => '1'];
         $first = $this->postJson(self::URL.'/goods-receipts', $data)->assertCreated();
-        $this->assertDatabaseHas('stock_movements', ['reference_number' => $first->json('number'), 'quantity' => '0.125']);
+        $this->assertDatabaseHas('stock_movements', ['reference_number' => $first->json('number'), 'quantity' => '1.000']);
         $manual = $this->postJson(self::URL.'/goods-receipts', [...$data, 'reference' => '  MY-DELIVERY-REF  '])->assertCreated()->assertJsonPath('number', 'MY-DELIVERY-REF');
         $this->assertDatabaseHas('stock_movements', ['reference_number' => $manual->json('number')]);
         $this->assertDatabaseCount('product_serials', 0);
@@ -68,19 +68,19 @@ class GoodsReceiptTest extends InventoryTestCase
         $warehouse = Warehouse::factory()->create();
         $this->actingAs($this->userWithPermissions());
         $this->travelTo(now()->setTime(18, 0));
-        $data = $this->receiptData($product, $warehouse, '0.001');
+        $data = $this->receiptData($product, $warehouse, '1');
         $this->postJson(self::URL.'/goods-receipts', $data)->assertCreated();
         $receipt = GoodsReceipt::query()->with('items.stockMovements')->firstOrFail();
         $this->assertNull($receipt->supplier_id);
         $this->assertSame(now('Asia/Jakarta')->toDateString(), $receipt->receipt_date->toDateString());
         $this->assertSame('75.25', $receipt->items[0]->unit_cost);
-        $this->assertSame('0.001', $receipt->items[0]->quantity_received);
+        $this->assertSame('1.000', $receipt->items[0]->quantity_received);
         $this->assertSame('pcs', $receipt->items[0]->unit);
         $this->assertSame($receipt->items[0]->getKey(), $receipt->items[0]->stockMovements[0]->receipt_item_id);
         $product->update(['purchase_price' => '999.00', 'unit' => 'box']);
         $this->assertSame('75.25', $receipt->items[0]->fresh()->unit_cost);
         $this->assertSame('pcs', $receipt->items[0]->fresh()->unit);
-        $this->assertSame('0.001', (string) app(UpdateStockService::class)->quantity($product->getKey(), $warehouse->getKey()));
+        $this->assertSame('1.000', (string) app(UpdateStockService::class)->quantity($product->getKey(), $warehouse->getKey()));
         $this->assertDatabaseHas('transaction_status_history', ['entity_name' => 'GOODS_RECEIPTS', 'old_status' => 'Draft', 'new_status' => 'Posted']);
         $this->assertDatabaseHas('audit_logs', ['action' => 'GOODS_IN']);
         $this->assertSame(DB::table('audit_logs')->value('request_id'), DB::table('transaction_status_history')->value('request_id'));
@@ -156,9 +156,12 @@ class GoodsReceiptTest extends InventoryTestCase
         $warehouse = Warehouse::factory()->create();
         $data = $this->receiptData($product, $warehouse);
         $this->actingAs($this->userWithPermissions());
-        foreach (['0', '-1', '0.0001', '1000000000000000', '1e2'] as $quantity) {
-            $this->postJson(self::URL.'/goods-receipts', [...$data, 'quantity' => $quantity])->assertUnprocessable();
+        foreach (['0', '-1', '1.125', '1.0001', '999999999999999.001', 1.25, '1000000000000000', '1e2'] as $quantity) {
+            $this->postJson(self::URL.'/goods-receipts', [...$data, 'quantity' => $quantity])->assertUnprocessable()->assertJsonValidationErrors('quantity');
         }
+        $this->call('POST', self::URL.'/goods-receipts', server: ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+            content: str_replace('"2.000"', '999999999999998.99', json_encode($data, JSON_THROW_ON_ERROR)))
+            ->assertUnprocessable()->assertJsonValidationErrors('quantity');
         foreach (['reference' => str_repeat('A', 51), 'product_id' => 99999, 'warehouse_id' => 99999, 'serial_numbers' => ['NOT-TRACKED']] as $field => $value) {
             $this->postJson(self::URL.'/goods-receipts', [...$data, $field => $value])->assertUnprocessable();
         }
@@ -169,8 +172,9 @@ class GoodsReceiptTest extends InventoryTestCase
         $product->update(['is_active' => true]);
         $warehouse->update(['deleted_at' => now()]);
         $this->postJson(self::URL.'/goods-receipts', $data)->assertUnprocessable();
-        $this->assertDatabaseCount('stock_movements', 0);
-        $this->assertDatabaseCount('goods_receipts', 0);
+        foreach (['goods_receipts', 'goods_receipt_items', 'stock_movements', 'product_serials', 'audit_logs', 'transaction_status_history'] as $table) {
+            $this->assertDatabaseCount($table, 0);
+        }
     }
 
     public function test_audit_failure_rolls_back_receipt_items_serials_movements_and_history(): void

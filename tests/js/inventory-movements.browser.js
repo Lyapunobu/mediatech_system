@@ -12,7 +12,7 @@
         if (!response.ok) throw new Error(`Read failed: ${response.status}`);
         return response.json();
     };
-    if ((await read(initial.urls.stocks)).summary.units !== '22.125' || (await read(initial.urls.orders)).length !== 0) {
+    if ((await read(initial.urls.stocks)).summary.units !== '23.000' || (await read(initial.urls.orders)).length !== 0) {
         throw new Error('Complete the disposable posting suite first. Do not rerun against modified fixtures.');
     }
     const checks = [];
@@ -57,7 +57,7 @@
         assert('18 serial-unit movements display as one 18-unit transaction', grouped.total === 1 && grouped.data.length === 1 && grouped.data[0].quantity === '18.000');
         const serials = grouped.data[0].serial_numbers;
         assert('all 18 distinct serials remain linked to that transaction', serials.length === 18 && new Set(serials).size === 18);
-        assert('the receipt adds 18 units, not 18 duplicate receipts worth of stock', (await read(initial.urls.stocks)).summary.units === '40.125');
+        assert('the receipt adds 18 units, not 18 duplicate receipts worth of stock', (await read(initial.urls.stocks)).summary.units === '41.000');
         const box = root.getBoundingClientRect();
         const width = document.documentElement.clientWidth;
         click('[data-open-dialog="movements-dialog"]');

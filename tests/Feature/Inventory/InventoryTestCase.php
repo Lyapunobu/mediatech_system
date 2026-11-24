@@ -50,12 +50,12 @@ abstract class InventoryTestCase extends TestCase
         return compact('product', 'warehouse', 'order', 'item');
     }
 
-    protected function receiptData(Product $product, Warehouse $warehouse, string $quantity = '2.500', array $serials = []): array
+    protected function receiptData(Product $product, Warehouse $warehouse, string $quantity = '2.000', array $serials = []): array
     {
         return ['reference' => 'TEST-GR-'.Str::uuid(), 'product_id' => $product->getKey(), 'warehouse_id' => $warehouse->getKey(), 'quantity' => $quantity, 'serial_numbers' => $serials, 'notes' => null];
     }
 
-    protected function issueData(array $scenario, string $quantity = '2.500', array $serials = []): array
+    protected function issueData(array $scenario, string $quantity = '2.000', array $serials = []): array
     {
         return ['request_key' => (string) Str::uuid(), 'sales_order_id' => $scenario['order']->getKey(), 'notes' => null, 'items' => [
             ['so_item_id' => $scenario['item']->getKey(), 'warehouse_id' => $scenario['warehouse']->getKey(), 'quantity' => $quantity, 'serial_ids' => $serials],

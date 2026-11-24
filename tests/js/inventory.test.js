@@ -31,7 +31,7 @@ test('the page script remains self-contained and has no production fixtures or H
     assert.match(script, /JSON\.parse\(app\.querySelector\('#inventory-bootstrap'\)/);
 });
 
-test('fixed-point quantities preserve all three decimals and the full database input range', () => {
+test('historical quantities retain their display precision but posting only accepts whole units', () => {
     assert.equal(quantityUnits('0.001'), 1n);
     assert.equal(quantityUnits('999999999999999.999'), 999999999999999999n);
     assert.equal(quantityUnits('0.1') + quantityUnits('0.2'), quantityUnits('0.3'));
@@ -40,8 +40,8 @@ test('fixed-point quantities preserve all three decimals and the full database i
     assert.equal(formatQuantity('999999999999999.999'), '999.999.999.999.999,999');
     assert.equal(formatQuantity('0.001'), '0,001');
     assert.equal(formatQuantity('12.500'), '12,5');
-    for (const value of ['0', '-1', '0.0001', '1000000000000000', '1e2', 'NaN', '', Infinity]) assert.equal(validQuantity(value), false);
-    assert.equal(validQuantity('999999999999999.999'), true);
+    for (const value of ['0', '-1', '1.125', '1.0001', '999999999999999.999', '1000000000000000', '1e2', 'NaN', '', Infinity]) assert.equal(validQuantity(value), false);
+    for (const value of ['1', '1.000', '999999999999999']) assert.equal(validQuantity(value), true);
 });
 
 test('local modal pagination retains drafts, clamps pages and supports consistent row sizes', () => {
@@ -55,12 +55,12 @@ test('local modal pagination retains drafts, clamps pages and supports consisten
 
 test('dispatch default respects stock, remaining quantity, serial availability and zero balances', () => {
     assert.equal(shipmentLimit(item, stock), '6');
-    assert.equal(shipmentLimit(item, { ...stock, qty: '0.001' }), '0.001');
+    assert.equal(shipmentLimit(item, { ...stock, qty: '-4' }), '0');
+    assert.equal(shipmentLimit({ ...item, delivered: '-1' }, stock), '0');
     assert.equal(shipmentLimit(item, undefined), '0');
     assert.equal(shipmentLimit({ ...item, delivered: '16.000' }, stock), '0');
     assert.equal(shipmentLimit({ ...item, track_serial: true }, { ...stock, serials: [{ id: 1 }, { id: 2 }] }), '2');
     assert.equal(shipmentLimit({ ...item, track_serial: true }, stock), '0');
-    assert.equal(shipmentLimit({ ...item, ordered: '1.500', delivered: '0', track_serial: true }, { ...stock, serials: [{ id: 1 }, { id: 2 }] }), '1');
 });
 
 test('partial dispatch validation rejects missing, foreign, duplicate and excessive lines without mutating input', () => {
@@ -70,17 +70,17 @@ test('partial dispatch validation rejects missing, foreign, duplicate and excess
     assert.notEqual(validateShipment(order, [{ ...selection, warehouse_id: 999 }]), '');
     assert.notEqual(validateShipment(order, [{ ...selection, so_item_id: 999 }]), '');
     assert.notEqual(validateShipment(order, [selection, selection]), '');
-    for (const quantity of ['0', '-1', '7', '0.0001', '1e2']) assert.notEqual(validateShipment(order, [{ ...selection, quantity }]), '');
+    for (const quantity of ['0', '-1', '7', '1.125', '1.0001', '1e2']) assert.notEqual(validateShipment(order, [{ ...selection, quantity }]), '');
     assert.equal(JSON.stringify(order), before);
 });
 
-test('two SO lines for the same product share a warehouse balance without floating-point rounding', () => {
-    const shared = { warehouse_id: 1, qty: '0.300', serials: [] };
-    const first = { ...item, ordered: '1.000', delivered: '0.000', stocks: [shared] };
+test('two SO lines for the same product share a whole warehouse balance', () => {
+    const shared = { warehouse_id: 1, qty: '3.000', serials: [] };
+    const first = { ...item, ordered: '10.000', delivered: '0.000', stocks: [shared] };
     const second = { ...first, id: 101 };
     const current = { items: [first, second] };
-    assert.equal(validateShipment(current, [{ ...selection, quantity: '0.100' }, { ...selection, so_item_id: 101, quantity: '0.200' }]), '');
-    assert.notEqual(validateShipment(current, [{ ...selection, quantity: '0.101' }, { ...selection, so_item_id: 101, quantity: '0.200' }]), '');
+    assert.equal(validateShipment(current, [{ ...selection, quantity: '1' }, { ...selection, so_item_id: 101, quantity: '2' }]), '');
+    assert.notEqual(validateShipment(current, [{ ...selection, quantity: '2' }, { ...selection, so_item_id: 101, quantity: '2' }]), '');
 });
 
 test('serial validation requires the selected product/warehouse serials once per whole unit', () => {

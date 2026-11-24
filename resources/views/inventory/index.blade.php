@@ -91,7 +91,7 @@
                         <div class="ui-field"><label for="receipt-product">Barang</label><x-ui.select id="receipt-product" name="product_id" required/></div>
                         <div class="ui-field"><label for="receipt-warehouse">Gudang</label><x-ui.select id="receipt-warehouse" name="warehouse_id" required/></div>
                         <div class="ui-field"><label for="receipt-reference">Nomor dokumen penerimaan</label><x-ui.input id="receipt-reference" name="reference" placeholder="Kosongkan untuk nomor otomatis" maxlength="50"/></div>
-                        <div class="ui-field"><label for="receipt-quantity">Jumlah diterima</label><x-ui.input type="number" id="receipt-quantity" name="quantity" min="0.001" step="0.001" placeholder="0" value="1" required/></div>
+                        <div class="ui-field"><label for="receipt-quantity">Jumlah diterima</label><x-ui.input type="number" id="receipt-quantity" name="quantity" min="1" max="999999999999999" step="1" placeholder="0" value="1" required/></div>
                         <div class="ui-field"><label for="receipt-serial">Nomor serial (opsional)</label><x-ui.textarea id="receipt-serial" name="serial" rows="1" class="min-h-0" placeholder="Kosongkan untuk serial otomatis; pisahkan serial manual dengan koma atau baris baru"/></div>
                         <div class="ui-field"><label for="receipt-notes">Catatan</label><x-ui.input id="receipt-notes" name="notes" placeholder="Keterangan singkat" maxlength="1000"/></div>
                         <p id="receipt-error" role="alert" class="border-l-2 border-error-500 pl-3 sm:col-span-2" hidden></p>

@@ -149,16 +149,16 @@ class StockMovementTest extends InventoryTestCase
         $s = $this->scenario();
         $this->actingAs($actor = $this->userWithPermissions());
         $this->postJson(self::URL.'/goods-receipts', $this->receiptData($s['product'], $s['warehouse'], '1'))->assertCreated();
-        $this->postJson(self::URL.'/goods-issues', $this->issueData($s, '2.500'))->assertCreated();
+        $this->postJson(self::URL.'/goods-issues', $this->issueData($s, '2'))->assertCreated();
         $sourceIn = DB::table('stock_movements')->where('movement_type', 'GOODS_IN')->value('movement_id');
         $sourceOut = DB::table('stock_movements')->where('movement_type', 'GOODS_OUT')->value('movement_id');
         foreach ([[StockMovementType::AdjustmentIn, '2.000', null], [StockMovementType::AdjustmentOut, '1.000', null],
-            [StockMovementType::ReversalIn, '0.500', $sourceOut], [StockMovementType::ReversalOut, '0.250', $sourceIn]] as [$type, $qty, $source]) {
+            [StockMovementType::ReversalIn, '2.000', $sourceOut], [StockMovementType::ReversalOut, '1.000', $sourceIn]] as [$type, $qty, $source]) {
             StockMovementFactory::new()->create(['product_id' => $s['product']->getKey(), 'warehouse_id' => $s['warehouse']->getKey(),
                 'recorded_by' => $actor->getKey(), 'movement_type' => $type, 'quantity' => $qty,
                 'reversal_of_movement_id' => $source, 'adjustment_reason' => $source ? null : 'Test adjustment']);
         }
-        $this->getJson(self::URL.'/stocks')->assertOk()->assertJsonPath('stocks.data.0.qty', '9.750')->assertJsonPath('summary.units', '9.750');
+        $this->getJson(self::URL.'/stocks')->assertOk()->assertJsonPath('stocks.data.0.qty', '11.000')->assertJsonPath('summary.units', '11.000');
         $this->getJson(self::URL.'/movements')->assertOk()->assertJsonPath('total', 7);
     }
 

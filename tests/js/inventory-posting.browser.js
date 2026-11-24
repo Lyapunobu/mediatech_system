@@ -59,12 +59,15 @@
         click('[data-open-dialog="goods-in-dialog"]');
         change(find('receipt-product'), String(product.product_id));
         change(find('receipt-warehouse'), String(secondWarehouse.warehouse_id));
-        change(find('receipt-reference'), 'BROWSER-GR-FRACTIONAL');
+        change(find('receipt-reference'), 'BROWSER-GR-WHOLE');
         change(find('receipt-quantity'), '0.125');
-        assert('nonserialized receipt supports three decimals and disables serial entry', find('receipt-quantity').step === '0.001' && find('receipt-serial').disabled);
+        assert('untracked receipt rejects fractional units and disables serial entry', find('receipt-quantity').step === '1' && find('receipt-quantity').validity.stepMismatch && find('receipt-serial').disabled);
+        find('goods-in-form').requestSubmit();
+        assert('fractional receipt does not reach the endpoint', records.length === 0 && find('goods-in-dialog').open);
+        change(find('receipt-quantity'), '1');
         find('goods-in-form').requestSubmit();
         await waitFor(() => !find('receipt-error').hidden, 'receipt validation error');
-        assert('server validation is shown without closing or clearing the receipt', find('receipt-error').textContent.includes('Server validation check') && find('goods-in-dialog').open && find('receipt-reference').value === 'BROWSER-GR-FRACTIONAL');
+        assert('server validation is shown without closing or clearing the receipt', find('receipt-error').textContent.includes('Server validation check') && find('goods-in-dialog').open && find('receipt-reference').value === 'BROWSER-GR-WHOLE');
         mode = 'hold';
         find('goods-in-form').requestSubmit();
         await waitFor(() => release, 'held receipt response');
@@ -77,7 +80,7 @@
         mode = 'normal';
         release();
         await waitFor(() => !find('goods-in-dialog').open && refreshed(), 'receipt success refresh');
-        assert('receipt posts through the real endpoint and refreshes exact stock', records[1].status === 201 && find('inventory-stock-total').textContent === '130,125');
+        assert('receipt posts through the real endpoint and refreshes exact stock', records[1].status === 201 && find('inventory-stock-total').textContent === '131');
         assert('successful receipt resets its document reference', find('receipt-reference').value === '');
 
         click('[data-open-dialog="goods-in-dialog"]');
@@ -89,7 +92,7 @@
         assert('serialized receipt requires whole units but keeps manual serial entry optional', find('receipt-quantity').step === '1' && !find('receipt-serial').required && !find('receipt-serial').disabled);
         find('goods-in-form').requestSubmit();
         await waitFor(() => !find('goods-in-dialog').open && refreshed(), 'serial receipt');
-        assert('serial receipt posts and refreshes the physical ledger', records[2].status === 201 && find('inventory-stock-total').textContent === '132,125');
+        assert('serial receipt posts and refreshes the physical ledger', records[2].status === 201 && find('inventory-stock-total').textContent === '133');
         const beforeDispatch = await read(initial.urls.order.replace('__ID__', initial.orders[0].id));
         const trackedItem = beforeDispatch.items.find((i) => i.product_id === tracked.product_id);
         assert('received serials are available alongside preserved legacy serials', trackedItem.stocks[0].serials.length === 4 && trackedItem.stocks[0].serials.some((s) => s.number === 'BROWSER-NEW-A'));
@@ -97,6 +100,9 @@
         click('[data-open-dialog="goods-out-dialog"]');
         let row = [...find('issue-lines').querySelectorAll('[data-issue-row]')].find((r) => r.querySelector('[data-field="sku"]').textContent === product.sku);
         selectOnly(row);
+        change(row.querySelector('[type="number"]'), '1.125');
+        find('goods-out-form').requestSubmit();
+        assert('fractional dispatch cannot open review or post', row.querySelector('[type="number"]').validity.stepMismatch && !find('goods-out-confirm-dialog').open && records.length === 3);
         change(row.querySelector('[type="number"]'), '3');
         change(find('issue-notes'), '<script>window.inventoryPostingInjected=true</script>');
         find('goods-out-form').requestSubmit();
@@ -106,14 +112,14 @@
         await waitFor(() => !find('issue-confirm-error').hidden && find('goods-out-confirm-dialog').dataset.posting !== 'true', 'lost-response recovery');
         const firstDispatch = records[3];
         assert('response loss preserves final review and reports uncertainty', firstDispatch.status === 201 && find('goods-out-confirm-dialog').open && find('issue-confirm-error').textContent.includes('konfirmasi yang sama'));
-        assert('server committed the first dispatch exactly once before the lost response', (await read(initial.urls.stocks)).summary.units === '129.125');
+        assert('server committed the first dispatch exactly once before the lost response', (await read(initial.urls.stocks)).summary.units === '130.000');
         click('[data-confirm-back]');
         assert('back after a failed response preserves entered quantity', row.querySelector('[type="number"]').value === '3' && find('goods-out-dialog').open);
         find('goods-out-form').requestSubmit();
         click('#goods-out-confirm-dialog [type="submit"]');
         await waitFor(() => !find('goods-out-confirm-dialog').open && refreshed(), 'idempotent retry');
         assert('retry after back/review keeps its original key and document ID', records[4].status === 200 && records[4].body.request_key === firstDispatch.body.request_key && records[4].response.id === firstDispatch.response.id);
-        assert('idempotent retry refreshes stock without a second deduction', find('inventory-stock-total').textContent === '129,125');
+        assert('idempotent retry refreshes stock without a second deduction', find('inventory-stock-total').textContent === '130');
         const afterDispatch = await read(initial.urls.order.replace('__ID__', initial.orders[0].id));
         assert('SO item delivery contract reflects the partial dispatch', afterDispatch.items.find((i) => i.product_id === product.product_id).delivered === '13.000');
 
@@ -131,14 +137,14 @@
         assert('selected serial appears in final confirmation', find('goods-out-confirm-dialog').open && find('issue-confirm-rows').textContent.includes('BROWSER-NEW-A'));
         click('#goods-out-confirm-dialog [type="submit"]');
         await waitFor(() => !find('goods-out-confirm-dialog').open && refreshed(), 'serial dispatch');
-        assert('serialized dispatch posts and updates physical stock once', records[5].status === 201 && find('inventory-stock-total').textContent === '128,125');
+        assert('serialized dispatch posts and updates physical stock once', records[5].status === 201 && find('inventory-stock-total').textContent === '129');
         const afterSerial = await read(initial.urls.order.replace('__ID__', initial.orders[0].id));
         const remaining = afterSerial.items.find((i) => i.product_id === tracked.product_id);
         assert('issued serial is removed from available choices and delivery is incremented', remaining.delivered === '1.000' && remaining.stocks[0].qty === '11.000' && !remaining.stocks[0].serials.some((s) => s.number === 'BROWSER-NEW-A'));
 
         const noCsrf = await originalFetch(initial.urls.receive, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ...records[1].body, reference: 'BROWSER-CSRF-MUST-NOT-POST' }) });
         assert('real local-environment CSRF middleware rejects a missing token', noCsrf.status === 419);
-        assert('rejected CSRF request makes no stock change', (await read(initial.urls.stocks)).summary.units === '128.125');
+        assert('rejected CSRF request makes no stock change', (await read(initial.urls.stocks)).summary.units === '129.000');
         const movements = await read(initial.urls.movements);
         assert('movement history adds two receipt items and two issue items, not one row per serial', movements.total === initialMovements + 4);
         assert('manual receipt reference is identical in movement history', (await read(initial.urls.movements + '?search=BROWSER-GR-SERIALS')).data.every((m) => m.reference === records[2].response.number));
@@ -157,13 +163,13 @@
         await waitFor(() => !find('receipt-error').hidden && find('goods-in-dialog').dataset.posting !== 'true', 'auto receipt committed with response loss');
         const autoReceipt = records[6];
         assert('blank fields generate a real receipt and add stock exactly once', autoReceipt.status === 201 && /^GR-\d{4}-\d{3,}$/.test(autoReceipt.response.number)
-            && autoReceipt.body.reference === '' && autoReceipt.body.serial_numbers.length === 0 && (await read(initial.urls.stocks)).summary.units === '130.125');
+            && autoReceipt.body.reference === '' && autoReceipt.body.serial_numbers.length === 0 && (await read(initial.urls.stocks)).summary.units === '131.000');
         assert('response loss leaves the blank form available for an unchanged retry', find('goods-in-dialog').open && find('receipt-reference').value.trim() === '' && find('receipt-serial').value === '');
         change(find('receipt-quantity'), '2.000');
         find('goods-in-form').requestSubmit();
         await waitFor(() => !find('goods-in-dialog').open && refreshed(), 'auto receipt idempotent retry');
         assert('automatic receipt retry retains the same key, document number and stock', records[7].status === 200 && records[7].body.request_key === autoReceipt.body.request_key
-            && records[7].response.number === autoReceipt.response.number && records[7].response.id === autoReceipt.response.id && (await read(initial.urls.stocks)).summary.units === '130.125');
+            && records[7].response.number === autoReceipt.response.number && records[7].response.id === autoReceipt.response.id && (await read(initial.urls.stocks)).summary.units === '131.000');
         const generatedMovements = await read(initial.urls.movements + '?search=' + autoReceipt.response.number);
         assert('generated receipt is one grouped movement retaining both serials and its document reference', generatedMovements.total === 1
             && generatedMovements.data[0].reference === autoReceipt.response.number && generatedMovements.data[0].quantity === '2.000'
@@ -184,7 +190,7 @@
         find('goods-in-form').requestSubmit();
         await waitFor(() => !find('goods-in-dialog').open && refreshed(), 'additional legitimate serialized receipt');
         assert('a new blank-field confirmation generates a different document and new serials', records[8].status === 201 && records[8].response.number !== autoReceipt.response.number
-            && records[8].body.request_key !== autoReceipt.body.request_key && find('inventory-stock-total').textContent === '134,125');
+            && records[8].body.request_key !== autoReceipt.body.request_key && find('inventory-stock-total').textContent === '135');
         click('[data-open-dialog="goods-out-dialog"]');
         const allRows = [...find('issue-lines').querySelectorAll('[data-issue-row]')];
         const warehouseRow = allRows.find((r) => r.querySelector('[data-field="sku"]').textContent === 'BROWSER-003');
@@ -203,7 +209,7 @@
         assert('multi-line review includes every selected line across modal pagination', find('goods-out-confirm-dialog').open && find('issue-confirm-rows').rows.length === 12);
         click('#goods-out-confirm-dialog [type="submit"]');
         await waitFor(() => !find('goods-out-confirm-dialog').open && refreshed(), 'multi-line partial warehouse dispatch');
-        assert('multi-line dispatch posts once and preserves stock in the other warehouse', records[9].status === 201 && find('inventory-stock-total').textContent === '27,125');
+        assert('multi-line dispatch posts once and preserves stock in the other warehouse', records[9].status === 201 && find('inventory-stock-total').textContent === '28');
         const lastOrder = await read(initial.urls.order.replace('__ID__', initial.orders[0].id));
         assert('only the outstanding line remains after partial warehouse delivery', lastOrder.items.length === 1 && lastOrder.items[0].sku === 'BROWSER-003'
             && lastOrder.items[0].delivered === '5.000' && lastOrder.items[0].stocks.length === 1);
@@ -212,11 +218,11 @@
         click('#goods-out-confirm-dialog [type="submit"]');
         await waitFor(() => !find('goods-out-confirm-dialog').open && refreshed(), 'complete order dispatch');
         assert('final remaining delivery completes the SO and refreshes eligible choices', records[10].status === 201
-            && (await read(initial.urls.orders)).length === 0 && find('inventory-stock-total').textContent === '22,125');
+            && (await read(initial.urls.orders)).length === 0 && find('inventory-stock-total').textContent === '23');
         click('[data-open-dialog="goods-out-dialog"]');
         assert('no eligible SO shows feedback instead of an empty Goods Out modal', !find('goods-out-dialog').open
             && find('inventory-feedback').textContent.includes('Tidak ada SO aktif'));
-        return { passed: checks.length, checks, posts: records.map((r) => ({ status: r.status, number: r.response?.number })), finalUnits: '22.125' };
+        return { passed: checks.length, checks, posts: records.map((r) => ({ status: r.status, number: r.response?.number })), finalUnits: '23.000' };
     } finally {
         window.fetch = originalFetch;
         release?.();

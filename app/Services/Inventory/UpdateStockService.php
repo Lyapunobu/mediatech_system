@@ -8,12 +8,24 @@ use App\Models\Inventory\StockMovement;
 use App\Models\Inventory\Warehouse;
 use App\Models\User;
 use Brick\Math\BigDecimal;
+use Closure;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class UpdateStockService
 {
+    public static function validateWholeUnitQuantity(string $attribute, mixed $value, Closure $fail): void
+    {
+        // Check the type first: stringifying a decoded JSON float can hide a fraction.
+        if ((! is_int($value) && ! is_string($value))
+            || ! preg_match('/\A(?=[0-9]*[1-9])[0-9]{1,15}(?:\.0{1,3})?\z/', (string) $value)) {
+            $fail('Jumlah harus berupa bilangan bulat positif.');
+        }
+    }
+
     public function lockMasters(array $productIds, array $warehouseIds, ?array $stockProductIds = null): array
     {
         $productIds = array_unique($productIds);
@@ -33,17 +45,39 @@ class UpdateStockService
         return [$products, $warehouses];
     }
 
-    public function quantity(int $productId, int $warehouseId, bool $lock = false): BigDecimal
+    public function quantity(int $productId, int $warehouseId): BigDecimal
     {
-        $row = DB::table('stock_movements')->where('product_id', $productId)->where('warehouse_id', $warehouseId)
-            ->when($lock, fn ($query) => $query->lockForUpdate())
-            ->selectRaw(StockMovementType::balanceSql().' AS balance')->first();
+        $row = $this->balanceQuery($productId, $warehouseId)->first();
 
         return BigDecimal::of((string) $row->balance)->toScale(3);
     }
 
+    public function postingBalance(int $productId, int $warehouseId, string $field): BigDecimal
+    {
+        // Call only after lockMasters(), in the same posting transaction.
+        $row = $this->balanceQuery($productId, $warehouseId)->lockForUpdate()
+            ->selectRaw('MIN(quantity) AS smallest_movement')
+            ->first();
+        if ($row->balance < 0 || ($row->smallest_movement !== null && $row->smallest_movement <= 0)) {
+            throw ValidationException::withMessages([$field => 'Riwayat stok gudang tidak valid. Tinjau data sebelum memposting.']);
+        }
+
+        return BigDecimal::of((string) $row->balance)->toScale(3);
+    }
+
+    private function balanceQuery(int $productId, int $warehouseId): Builder
+    {
+        return DB::table('stock_movements')->where('product_id', $productId)->where('warehouse_id', $warehouseId)
+            ->selectRaw(StockMovementType::balanceSql().' AS balance');
+    }
+
     public function record(User $actor, int $productId, int $warehouseId, string $quantity, StockMovementType $type, string $reference, ?int $receiptItemId = null, ?int $issueItemId = null, ?int $serialId = null): StockMovement
     {
+        // Serial posting records the fixed, already-valid one-unit magnitude.
+        if ($quantity !== '1.000') {
+            Validator::validate(['quantity' => $quantity], ['quantity' => ['required', self::validateWholeUnitQuantity(...)]]);
+        }
+
         return StockMovement::query()->create([
             'product_id' => $productId, 'warehouse_id' => $warehouseId, 'quantity' => $quantity,
             'movement_type' => $type, 'reference_number' => $reference, 'recorded_by' => $actor->getKey(),

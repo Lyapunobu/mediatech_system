@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Inventory;
 
+use App\Services\Inventory\UpdateStockService;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreGoodsIssueRequest extends FormRequest
@@ -20,7 +21,7 @@ class StoreGoodsIssueRequest extends FormRequest
             'items.*' => ['required', 'array:so_item_id,warehouse_id,quantity,serial_ids'],
             'items.*.so_item_id' => ['required', 'integer', 'min:1', 'distinct'],
             'items.*.warehouse_id' => ['required', 'integer', 'min:1'],
-            'items.*.quantity' => ['required', 'numeric', 'gt:0', 'regex:/^\d{1,15}(?:\.\d{1,3})?$/'],
+            'items.*.quantity' => ['required', UpdateStockService::validateWholeUnitQuantity(...)],
             'items.*.serial_ids' => ['present', 'array'],
             'items.*.serial_ids.*' => ['required', 'integer', 'min:1', 'distinct'],
             'notes' => ['nullable', 'string', 'max:1000'],

@@ -31,7 +31,7 @@
                 </label>
             </td>
             <td data-available></td>
-            <td><x-ui.input type="number" min="0.001" step="0.001" required/></td>
+            <td><x-ui.input type="number" min="1" step="1" required/></td>
             <td><x-ui.select data-warehouse class="min-w-40"/></td>
         </tr>
     </template>

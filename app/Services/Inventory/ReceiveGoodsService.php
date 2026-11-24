@@ -13,6 +13,7 @@ use Brick\Math\BigDecimal;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -25,6 +26,7 @@ class ReceiveGoodsService
         foreach (['inventory.read', 'inventory.create', 'inventory.post'] as $permission) {
             Gate::forUser($actor)->authorize($permission);
         }
+        Validator::validate($data, ['quantity' => ['required', UpdateStockService::validateWholeUnitQuantity(...)]]);
         $data['reference'] = trim($data['reference'] ?? '');
         $data['serial_numbers'] ??= [];
         $quantity = BigDecimal::of((string) $data['quantity'])->toScale(3);
@@ -60,9 +62,8 @@ class ReceiveGoodsService
                     }
                     $serials = $data['serial_numbers'];
                     if ($product->track_serial) {
-                        if (! str_ends_with((string) $quantity, '.000') || ! $quantity->isPositive()
-                            || ($serials !== [] && ! $quantity->isEqualTo(count($serials)))) {
-                            throw ValidationException::withMessages(['serial_numbers' => 'Jumlah barang berserial harus bulat. Kosongkan serial untuk otomatis, atau isi satu serial unik per unit.']);
+                        if ($serials !== [] && ! $quantity->isEqualTo(count($serials))) {
+                            throw ValidationException::withMessages(['serial_numbers' => 'Kosongkan serial untuk otomatis, atau isi satu serial unik per unit.']);
                         }
                         if (ProductSerial::query()->whereIn('serial_number', $serials)->exists()) {
                             throw ValidationException::withMessages(['serial_numbers' => 'Nomor serial sudah terdaftar.']);
@@ -70,7 +71,7 @@ class ReceiveGoodsService
                     } elseif ($serials !== []) {
                         throw ValidationException::withMessages(['serial_numbers' => 'Produk ini tidak menggunakan nomor serial.']);
                     }
-                    $before = (string) $this->stock->quantity($product->getKey(), $data['warehouse_id'], lock: true);
+                    $before = (string) $this->stock->postingBalance($product->getKey(), $data['warehouse_id'], 'quantity');
                     $receipt = GoodsReceipt::query()->create([
                         'receipt_number' => $data['reference'] !== '' ? $data['reference'] : 'TMP-'.Str::uuid(), 'supplier_id' => null,
                         'posting_key' => $key, 'posting_fingerprint' => $fingerprint,

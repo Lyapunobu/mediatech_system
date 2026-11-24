@@ -15,6 +15,7 @@ use Brick\Math\BigDecimal;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -40,6 +41,7 @@ class PostGoodsIssueService
         foreach (['inventory.read', 'inventory.update', 'inventory.post'] as $permission) {
             Gate::forUser($actor)->authorize($permission);
         }
+        Validator::validate($data, ['items.*.quantity' => ['required', UpdateStockService::validateWholeUnitQuantity(...)]]);
         $postingKey = hash('sha256', $actor->getKey().':'.$data['request_key']);
         $legacyNumber = 'GI-'.strtoupper(substr($postingKey, 0, 32));
         $requestId = $this->stock->requestId();
@@ -80,15 +82,19 @@ class PostGoodsIssueService
                     $item = $orderItems[$line['so_item_id']];
                     $product = $products[$item->product_id];
                     $qty = BigDecimal::of((string) $line['quantity'])->toScale(3);
-                    $remaining = BigDecimal::of($item->quantity_ordered)->minus($item->quantity_delivered);
-                    if (! $qty->isPositive() || $qty->isGreaterThan($remaining)) {
+                    $ordered = BigDecimal::of($item->quantity_ordered);
+                    $delivered = BigDecimal::of($item->quantity_delivered);
+                    if ($delivered->isNegative()) {
+                        throw ValidationException::withMessages(["items.$index.quantity" => 'Kuantitas pada riwayat baris Sales Order tidak valid. Tinjau data sebelum memposting.']);
+                    }
+                    if ($qty->isGreaterThan($ordered->minus($delivered))) {
                         throw ValidationException::withMessages(["items.$index.quantity" => 'Jumlah melebihi sisa pesanan.']);
                     }
                     if (mb_strlen($item->unit_snapshot) > 30) {
                         throw ValidationException::withMessages(["items.$index" => 'Satuan snapshot SO melebihi kapasitas satuan Goods Out.']);
                     }
                     $key = $item->product_id.':'.$line['warehouse_id'];
-                    $stockBefore[$key] ??= $this->stock->quantity($item->product_id, $line['warehouse_id'], lock: true);
+                    $stockBefore[$key] ??= $this->stock->postingBalance($item->product_id, $line['warehouse_id'], "items.$index.quantity");
                     $stockUsed[$key] = ($stockUsed[$key] ?? BigDecimal::zero())->plus($qty);
                     if ($stockUsed[$key]->isGreaterThan($stockBefore[$key])) {
                         throw ValidationException::withMessages(["items.$index.quantity" => 'Stok gudang tidak cukup. Data mungkin sudah berubah.']);

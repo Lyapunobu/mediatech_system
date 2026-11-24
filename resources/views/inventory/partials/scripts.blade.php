@@ -260,8 +260,6 @@ function initializeInventory(root, initial) {
         find('receipt-serial').disabled = !tracked;
         find('receipt-serial').required = false;
         find('receipt-serial').setCustomValidity('');
-        find('receipt-quantity').min = tracked ? '1' : '0.001';
-        find('receipt-quantity').step = tracked ? '1' : '0.001';
         root.querySelector('label[for="receipt-serial"]').textContent = 'Nomor serial (opsional)';
     }
     if (receiptForm) {
@@ -278,7 +276,7 @@ function initializeInventory(root, initial) {
             const serials = parseSerials(String(data.get('serial') ?? ''));
             find('receipt-error').hidden = true;
             find('receipt-reference').setCustomValidity('');
-            find('receipt-quantity').setCustomValidity(validQuantity(quantity) ? '' : 'Jumlah harus positif dengan maksimal tiga angka desimal.');
+            find('receipt-quantity').setCustomValidity(validQuantity(quantity) ? '' : 'Jumlah harus berupa bilangan bulat positif (maksimal 999.999.999.999.999).');
             if (product?.track_serial) find('receipt-serial').setCustomValidity(!serials.length || quantityUnits(quantity) === BigInt(serials.length) * 1000n
                 && new Set(serials.map((s) => s.toLocaleLowerCase())).size === serials.length && serials.every((s) => s.length <= 120) ? '' : 'Isi satu serial unik (maksimal 120 karakter) per unit, dipisahkan koma atau baris baru.');
             if (!product || !receiptForm.reportValidity()) return;
@@ -351,12 +349,9 @@ function initializeInventory(root, initial) {
             if (wasDisabled || rebuildSerials) checkbox.checked = !checkbox.disabled;
             if (checkbox.disabled) checkbox.checked = false;
             quantity.disabled = !checkbox.checked;
-            quantity.min = item.track_serial ? '1' : '0.001';
-            quantity.step = item.track_serial ? '1' : '0.001';
             quantity.max = limit;
             if (rebuildSerials) {
-                const old = quantityUnits(quantity.value);
-                quantity.value = old === null || old <= 0n || old > quantityUnits(limit) ? limit : quantity.value;
+                quantity.value = !validQuantity(quantity.value) || quantityUnits(quantity.value) > quantityUnits(limit) ? limit : quantity.value;
                 serialSelect.replaceChildren(...(stock?.serials ?? []).map((s) => new Option(s.number, s.id)));
             }
             if (item.track_serial && syncSerials && checkbox.checked) {
@@ -537,7 +532,7 @@ function formatQuantity(value) {
     return new Intl.NumberFormat('id-ID').format(BigInt(whole)) + (fraction ? `,${fraction}` : '');
 }
 function validQuantity(value) {
-    return /^\d{1,15}(?:\.\d{1,3})?$/.test(String(value)) && quantityUnits(value) > 0n;
+    return /^\d{1,15}(?:\.0{1,3})?$/.test(String(value)) && quantityUnits(value) > 0n;
 }
 function parseSerials(value) {
     return value.split(/[,\r\n]+/).map((v) => v.trim()).filter(Boolean);
@@ -570,11 +565,13 @@ function paginate(rows, page = 1, size = 10) {
     return { rows: rows.slice(start, start + perPage), page: current, pages, total: rows.length, start: rows.length ? start + 1 : 0, end: Math.min(start + perPage, rows.length) };
 }
 function shipmentLimit(item, stock) {
-    let limit = quantityUnits(item.ordered) - quantityUnits(item.delivered);
+    const ordered = quantityUnits(item.ordered);
+    const delivered = quantityUnits(item.delivered);
     const available = quantityUnits(stock?.qty ?? '0');
+    if ([ordered, delivered, available].some((units) => units === null || units < 0n)) return '0';
+    let limit = ordered - delivered;
     if (limit > available) limit = available;
     if (item.track_serial && limit > BigInt(stock?.serials.length ?? 0) * 1000n) limit = BigInt(stock?.serials.length ?? 0) * 1000n;
-    if (item.track_serial) limit = limit / 1000n * 1000n;
     return quantityString(limit > 0n ? limit : 0n);
 }
 function defaultSerialSelection(serials, quantity, current = [], reserved = []) {
@@ -594,6 +591,7 @@ function validateShipment(order, selections) {
         const item = order.items.find((i) => String(i.id) === String(row.so_item_id));
         const stock = item?.stocks.find((s) => String(s.warehouse_id) === String(row.warehouse_id));
         if (!item || !stock || !validQuantity(row.quantity) || usedItems.has(String(item.id))) return 'Barang, gudang, atau jumlah keluar tidak valid.';
+        if (shipmentLimit(item, stock) === '0') return 'Barang tidak dapat dikeluarkan dari gudang yang dipilih.';
         usedItems.add(String(item.id));
         const quantity = quantityUnits(row.quantity);
         const key = `${item.product_id}|${row.warehouse_id}`;
