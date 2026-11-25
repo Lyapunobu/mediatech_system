@@ -5,6 +5,7 @@ namespace Database\Seeders\Demo;
 use Database\Seeders\Support\SeederSupport;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class GoodsOutSeeder extends Seeder
 {
@@ -14,6 +15,11 @@ class GoodsOutSeeder extends Seeder
     {
         if (!$this->isDemoEnvironment()) return;
 
+        DB::transaction(fn () => $this->seedIssues());
+    }
+
+    private function seedIssues(): void
+    {
         $warehouseUserId = $this->userId('jakoy@meditech.co.id');
         $issues = [
             ['GI-2026-058', 'SO-2026-031', '2026-10-17', 'Pengiriman sebagian 10 unit Kamera CCTV Hikvision 2MP.', ['PRD-011' => 10]],
@@ -62,25 +68,28 @@ class GoodsOutSeeder extends Seeder
                     ->where('warehouse_id', $warehouseId)
                     ->value('goods_issue_item_id');
 
-                $movement = DB::table('stock_movements')->where('goods_issue_item_id', $issueItemId)->where('movement_type', 'GOODS_OUT')->first();
                 $movementValues = [
                     'product_id' => $productId,
                     'warehouse_id' => $warehouseId,
                     'receipt_item_id' => null,
                     'goods_issue_item_id' => $issueItemId,
-                    'serial_id' => null,
                     'reversal_of_movement_id' => null,
                     'recorded_by' => $warehouseUserId,
                     'movement_date' => $date . ' 16:00:00',
                     'movement_type' => 'GOODS_OUT',
-                    'quantity' => $quantity,
                     'reference_number' => $number,
                     'adjustment_reason' => null,
                 ];
-                if ($movement) {
-                    DB::table('stock_movements')->where('movement_id', $movement->movement_id)->update($movementValues);
+                if (DB::table('products')->where('product_id', $productId)->value('track_serial')) {
+                    $this->issueSerials($productId, $warehouseId, $issueItemId, $quantity, $movementValues);
                 } else {
-                    DB::table('stock_movements')->insert($movementValues);
+                    $movement = DB::table('stock_movements')->where('goods_issue_item_id', $issueItemId)->where('movement_type', 'GOODS_OUT')->first();
+                    $movementValues += ['serial_id' => null, 'quantity' => $quantity];
+                    if ($movement) {
+                        DB::table('stock_movements')->where('movement_id', $movement->movement_id)->update($movementValues);
+                    } else {
+                        DB::table('stock_movements')->insert($movementValues);
+                    }
                 }
 
                 DB::table('sales_order_items')->where('so_item_id', $soItem->so_item_id)
@@ -93,5 +102,39 @@ class GoodsOutSeeder extends Seeder
         $serviceId = $this->productId('PRD-017');
         DB::table('sales_order_items')->where('sales_order_id', $so30)->where('product_id', $serviceId)
             ->update(['quantity_delivered' => DB::raw('quantity_ordered')]);
+    }
+
+    /**
+     * Same shape as PostGoodsIssueService: each issued unit consumes one in-stock serial with a 1-unit GOODS_OUT movement.
+     */
+    private function issueSerials(int $productId, int $warehouseId, int $issueItemId, int $quantity, array $movementValues): void
+    {
+        // Older demo data issued serial-tracked stock as one bulk movement without serials.
+        DB::table('stock_movements')
+            ->where('goods_issue_item_id', $issueItemId)
+            ->where('movement_type', 'GOODS_OUT')
+            ->whereNull('serial_id')
+            ->delete();
+
+        $issued = DB::table('stock_movements')
+            ->where('goods_issue_item_id', $issueItemId)
+            ->where('movement_type', 'GOODS_OUT')
+            ->whereNotNull('serial_id')
+            ->count();
+        $serialIds = DB::table('product_serials')
+            ->where('product_id', $productId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('status', 'In Stock')
+            ->orderBy('serial_id')
+            ->limit(max(0, $quantity - $issued))
+            ->pluck('serial_id');
+        if ($issued + $serialIds->count() < $quantity) {
+            throw new RuntimeException("Serial demo tidak cukup untuk produk {$productId}. Jalankan GoodsReceiptSeeder lebih dahulu.");
+        }
+
+        foreach ($serialIds as $serialId) {
+            DB::table('stock_movements')->insert($movementValues + ['serial_id' => $serialId, 'quantity' => 1]);
+            DB::table('product_serials')->where('serial_id', $serialId)->update(['status' => 'Issued', 'warehouse_id' => null]);
+        }
     }
 }
